@@ -21,8 +21,11 @@ export class ReaderView extends ItemView {
   private channelKey() { return JSON.stringify([this.plugin.state.settings.baseUrl, this.source]); }
   private saveChannel() {
     if (!this.list || !this.reader) return;
+    // Strip heavy `content` from channelStates to avoid duplicating subscriptions[].entries[].content
+    // (content is 95% of data.json). Content is re-hydrated from subscriptions on restore.
+    const stripContent = (entry: Entry): Entry => entry.content ? { ...entry, content: undefined } : entry;
     this.plugin.state.channelStates[this.channelKey()] = {
-      entries: this.entries, bundle: this.bundle, mode: this.mode, filter: this.filter, query: this.query,
+      entries: this.entries.map(stripContent), bundle: this.bundle, mode: this.mode, filter: this.filter, query: this.query,
       unread: [...this.unreadSession], cursor: this.cursor, hasMore: this.hasMore,
       listTop: this.pendingScroll?.listTop ?? (this.list.clientHeight ? this.list.scrollTop : this.lastListTop),
       readerTop: this.pendingScroll?.readerTop ?? (this.reader.clientHeight ? this.reader.scrollTop : this.lastReaderTop), articlePending: this.articleLoading,
@@ -40,7 +43,25 @@ export class ReaderView extends ItemView {
     this.restoreObserver.observe(this.list); this.restoreObserver.observe(this.reader);
   }
   private restoreChannel(saved: ChannelState) {
-    this.entries = saved.entries; this.bundle = saved.bundle; this.mode = saved.mode;
+    // Re-hydrate stripped `content` from subscriptions (the single source of truth)
+    const byId = new Map<string, Entry>();
+    for (const feed of this.plugin.state.subscriptions) for (const e of feed.entries) byId.set(e.id, e);
+    // Also consider cached/favorite bundles as fallback
+    for (const b of Object.values(this.plugin.state.cache)) byId.set(b.entry.id, b.entry);
+    for (const b of Object.values(this.plugin.state.favorites)) byId.set(b.entry.id, b.entry);
+    for (const b of Object.values(this.plugin.state.savedArticles)) byId.set(b.entry.id, b.entry);
+    const hydrate = (e: Entry): Entry => {
+      if (e.content) return e;
+      const found = byId.get(e.id);
+      return found?.content ? { ...e, content: found.content, summary: e.summary ?? found.summary } : e;
+    };
+    this.entries = saved.entries.map(hydrate);
+    // Also hydrate bundle entry if stripped
+    if (saved.bundle && !saved.bundle.entry.content) {
+      const found = byId.get(saved.bundle.entry.id);
+      if (found?.content) saved.bundle = { ...saved.bundle, entry: { ...saved.bundle.entry, content: found.content } };
+    }
+    this.bundle = saved.bundle; this.mode = saved.mode;
     this.filter = saved.filter; this.query = saved.query; this.unreadSession = new Set(saved.unread);
     this.cursor = saved.cursor; this.hasMore = saved.hasMore; this.lastListTop = saved.listTop; this.lastReaderTop = saved.readerTop;
     this.pendingScroll = { listTop: saved.listTop, readerTop: saved.readerTop };

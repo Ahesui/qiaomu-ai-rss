@@ -33,6 +33,8 @@ export default class QiaomuRssPlugin extends Plugin {
     const data: unknown = await this.loadData();
     try { this.state = initialState(data); }
     catch { new Notice('RSS 配置不兼容，已使用默认设置。'); }
+    // One-time migration: strip duplicated `content` from channelStates["@local"] to halve data.json
+    { let migrated = 0; for (const [key, cs] of Object.entries(this.state.channelStates)) if (key.includes('@local') || key.includes('@group:')) for (const e of cs.entries as { content?: string }[]) if (e.content) { delete (e as { content?: unknown }).content; migrated++; } if (migrated) { void this.persist(); console.debug(`[qiaomu-ai-rss] migrated: stripped content from ${migrated} channelStates entries`); } }
     this.images = new LocalImages(this.app.vault, `${this.app.vault.configDir}/plugins/${this.manifest.id}/image-cache`);
     registerImageDrops(this);
     this.subscriptions = new Subscriptions(() => this.state, () => this.persist());

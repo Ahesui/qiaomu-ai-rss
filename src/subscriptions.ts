@@ -54,24 +54,27 @@ export class Subscriptions {
   }
   async refresh(ids: string[], doc: Document, force = false, updated?: () => void): Promise<void> {
     const remaining = [...ids];
-    const worker = async () => { while (remaining.length) { const id = remaining.shift(); if (id) { await this.refreshOne(id, doc, force); updated?.(); } } };
+    let dirty = false;
+    const worker = async () => { while (remaining.length) { const id = remaining.shift(); if (id) { const changed = await this.refreshOne(id, doc, force, false); if (changed) dirty = true; updated?.(); } } };
     await Promise.all(Array.from({ length: Math.min(3, remaining.length) }, worker));
+    if (dirty) await this.persist();
   }
-  private refreshOne(id: string, doc: Document, force: boolean): Promise<void> {
-    const ongoing = this.pending.get(id); if (ongoing) return ongoing;
+  private refreshOne(id: string, doc: Document, force: boolean, doPersist = true): Promise<boolean> {
+    const ongoing = this.pending.get(id) as Promise<boolean> | undefined; if (ongoing) return ongoing;
     const feed = this.state().subscriptions.find(item => item.id === id);
-    if (!feed || (!force && Date.now() - feed.updatedAt < 300000)) return Promise.resolve();
-    const refresh = async () => {
+    if (!feed || (!force && Date.now() - feed.updatedAt < 300000)) return Promise.resolve(false);
+    const refresh = async (): Promise<boolean> => {
       try {
         const parsed = await this.fetch(feed.url, doc);
-        if (!this.state().subscriptions.includes(feed)) return;
+        if (!this.state().subscriptions.includes(feed)) return false;
         feed.entries = parsed.entries; feed.updatedAt = Date.now(); feed.error = '';
       } catch (error) {
-        if (!this.state().subscriptions.includes(feed)) return;
+        if (!this.state().subscriptions.includes(feed)) return false;
         feed.error = error instanceof Error ? error.message : '订阅源无法读取。';
       }
-      await this.persist();
+      if (doPersist) await this.persist();
+      return true;
     };
-    const promise = refresh().finally(() => this.pending.delete(id)); this.pending.set(id, promise); return promise;
+    const promise = refresh().finally(() => this.pending.delete(id)); this.pending.set(id, promise as unknown as Promise<void>); return promise;
   }
 }

@@ -38,7 +38,7 @@ export default class QiaomuRssPlugin extends Plugin {
     await this.loadContentCache();
     this.images = new LocalImages(this.app.vault, `${this.app.vault.configDir}/plugins/${this.manifest.id}/image-cache`);
     registerImageDrops(this);
-    this.subscriptions = new Subscriptions(() => this.state, () => this.persist());
+    this.subscriptions = new Subscriptions(() => this.state, () => this.persist(), undefined, () => this.markBodiesDirty());
     this.addCommand({ id: 'manage-subscriptions', name: '管理我的订阅', callback: () => this.manageSubscriptions() });
     this.registerView(VIEW_TYPE, leaf => new ReaderView(leaf, this));
     this.registerView(DISCOVERY_VIEW_TYPE, leaf => new DiscoveryView(leaf, this));
@@ -107,11 +107,15 @@ export default class QiaomuRssPlugin extends Plugin {
     return this.saving;
   }
   private cachePath() { return `${this.app.vault.configDir}/plugins/${this.manifest.id}/content-cache.json`; }
+  private cacheDirty = true;
+  markBodiesDirty() { this.cacheDirty = true; }
   private async saveSplit(): Promise<void> {
-    // data.json keeps config + metadata only; entry bodies go to a rebuildable cache file.
+    // data.json keeps config + metadata only; entry bodies go to a rebuildable cache file,
+    // rewritten only when bodies actually changed (scroll checkpoints must not rewrite 21MB).
     const { slim, cache } = splitContentCache(this.state);
     await this.saveData(slim);
-    try { await this.app.vault.adapter.write(this.cachePath(), JSON.stringify(cache)); }
+    if (!this.cacheDirty) return;
+    try { await this.app.vault.adapter.write(this.cachePath(), JSON.stringify(cache)); this.cacheDirty = false; }
     catch { /* body cache is rebuildable from feeds; a write failure must not break state save */ }
   }
   private async loadContentCache(): Promise<void> {
@@ -146,6 +150,7 @@ export default class QiaomuRssPlugin extends Plugin {
     if (!feed) return { freedBytes: 0, freedCount: 0 };
     const { entries, freedBytes, freedCount } = stripFeedBodies(feed.entries);
     feed.entries = entries;
+    if (freedCount) this.markBodiesDirty();
     await this.persist();
     return { freedBytes, freedCount };
   }
@@ -155,6 +160,7 @@ export default class QiaomuRssPlugin extends Plugin {
       const result = stripFeedBodies(feed.entries);
       feed.entries = result.entries; freedBytes += result.freedBytes; freedCount += result.freedCount;
     }
+    if (freedCount) this.markBodiesDirty();
     await this.persist();
     return { freedBytes, freedCount };
   }
@@ -168,6 +174,7 @@ export default class QiaomuRssPlugin extends Plugin {
     return !queued;
   }
   remember(bundle: Bundle) {
+    if (bundle.entry.content) this.markBodiesDirty();
     this.state.cache[bundle.entry.id] = bundle;
     const recent = Object.values(this.state.cache).sort((a, b) => b.fetchedAt - a.fetchedAt).slice(0, 40);
     this.state.cache = Object.fromEntries(recent.map(value => [value.entry.id, value]));

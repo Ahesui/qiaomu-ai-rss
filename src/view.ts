@@ -9,7 +9,7 @@ import { readingFonts, selectableFonts, fontFamily } from './fonts';
 import { articleFragment } from './content';
 import { modeLabels, modeSchema, readingFontSchema, safeUrl, titleOf, type ChannelState, type Bundle, type Entry, type Mode } from './model';
 export const VIEW_TYPE = 'qiaomu-ai-rss-reader';
-type Filter = 'all' | 'unread' | 'favorites';
+type Filter = 'all' | 'unread' | 'favorites' | 'later';
 function feedHost(url: string) { try { return new URL(url).hostname; } catch { return 'RSS'; } }
 export class ReaderView extends ItemView {
   private channelPicker?: ChannelPicker;
@@ -267,7 +267,8 @@ export class ReaderView extends ItemView {
   }
   private renderFilters() {
     this.filters.empty();
-    for (const [value, label] of [['all', '全部'], ['unread', '未读'], ['favorites', '收藏']] as const) {
+    const laterCount = this.plugin.state.readLater.length;
+    for (const [value, label] of [['all', '全部'], ['unread', '未读'], ['favorites', '收藏'], ['later', laterCount ? `稍后读（${laterCount}）` : '稍后读']] as const) {
       const button = this.filters.createEl('button', { text: label, attr: { 'aria-pressed': String(value === this.filter), 'data-filter': value } });
       button.addEventListener('click', () => { this.filter = value; this.unreadSession.clear(); this.resetWindow(); this.renderFilters(); this.renderList(); });
     }
@@ -366,6 +367,7 @@ export class ReaderView extends ItemView {
       (target?.closest?.('input,textarea,select,[contenteditable=true]'))) return;
     const key = event.key.toLowerCase();
     if (key === 'j' || key === 'k') { event.preventDefault(); event.stopPropagation(); this.navigate(key === 'j' ? 1 : -1); }
+    if (key === 'm' && this.bundle) { event.preventDefault(); event.stopPropagation(); void this.plugin.toggleLater(this.bundle.entry).then(() => { this.renderFilters(); this.renderReader(true); this.renderList(); }); }
     if (event.key === '[' || event.key === 'f') { event.preventDefault(); this.toggleFocus(); }
     if (event.key === '/') { event.preventDefault(); this.toggleSearch(true); }
     if (event.key === 'Escape') { this.focused = false; this.contentEl.removeClass('qrs-focus'); this.contentEl.removeClass('qrs-has-article'); }
@@ -412,6 +414,10 @@ export class ReaderView extends ItemView {
   private visibleEntries(): Entry[] {
     const state = this.plugin.state;
     const entries = this.filter === 'favorites' ? Object.values(state.favorites).map(b => b.entry) : this.entries;
+    if (this.filter === 'later') {
+      const order = new Map(state.readLater.map((id, i) => [id, i] as const));
+      return entries.filter(e => order.has(e.id)).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+    }
     const query = this.query.trim().toLocaleLowerCase();
     return entries.filter(entry => (this.vaultScope() ? entry.origin === 'vault' && entry.sourceId === this.source : this.personalScope()
       ? entry.origin === 'local' && (this.source === '@local' || this.selectedFeeds().some(feed => feed.id === entry.sourceId))
@@ -516,6 +522,8 @@ export class ReaderView extends ItemView {
   }
   private async openArticle(entry: Entry, resume?: ChannelState) {
     this.stopRestoring();
+    // Reading from the queue consumes the item.
+    if (this.filter === 'later') this.plugin.state.readLater = this.plugin.state.readLater.filter(id => id !== entry.id);
     // Ensure the opened row exists in the windowed list.
     { const idx = this.visibleEntries().findIndex(e => e.id === entry.id);
       if (idx >= this.renderedCount) this.renderedCount = Math.min(this.visibleEntries().length, idx + ReaderView.PAGE_SIZE); }
@@ -626,7 +634,7 @@ export class ReaderView extends ItemView {
       empty.createEl('button', { cls: 'qrs-welcome-next', text: '下一则 →' }).onclick = () => { this.welcomeTip = (this.welcomeTip + 1) % tips.length; showTip(); };
       if (!Platform.isMobileApp) {
         const keys = empty.createDiv('qrs-welcome-keys');
-        for (const [key, label] of [['J / K', '下篇 / 上篇'], ['[', '收起列表'], ['/', '搜索文章']]) { const item = keys.createSpan(); item.createEl('kbd', { text: key }); item.createSpan({ text: label }); }
+        for (const [key, label] of [['J / K', '下篇 / 上篇'], ['[', '收起列表'], ['/', '搜索文章'], ['M', '稍后读']]) { const item = keys.createSpan(); item.createEl('kbd', { text: key }); item.createSpan({ text: label }); }
       }
       return;
     }
@@ -649,6 +657,11 @@ export class ReaderView extends ItemView {
       await this.plugin.persist(); this.renderReader(true); this.renderList();
     }));
     bookmark.setAttribute('aria-pressed', String(favorite)); bookmark.toggleClass('is-bookmarked', favorite);
+    const later = this.plugin.isLater(bundle.entry.id);
+    const laterButton = this.addIconButton(actions, 'clock', later ? '移出稍后读' : '稍后读 M', () => this.run(async () => {
+      await this.plugin.toggleLater(bundle.entry); this.renderFilters(); this.renderReader(true); this.renderList();
+    }));
+    laterButton.setAttribute('aria-pressed', String(later)); laterButton.toggleClass('is-bookmarked', later);
     const read = this.plugin.state.readIds.includes(bundle.entry.id);
     const readButton = this.addIconButton(actions, read ? 'circle-check' : 'circle', read ? '标为未读' : '标为已读', () => this.run(async () => {
       const ids = this.plugin.state.readIds.filter(id => id !== bundle.entry.id);

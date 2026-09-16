@@ -2,7 +2,7 @@ import { EditorView } from '@codemirror/view';
 import { MarkdownView, Notice, Plugin, PluginSettingTab, TFile, type App, type SettingDefinitionItem } from 'obsidian';
 import { requestUrl } from 'obsidian';
 import { RssApi } from './api';
-import { folderPath, initialState, modeLabels, modeSchema, readingFontSchema, type Bundle, type Entry, type Mode, type State } from './model';
+import { attachContentCache, folderPath, initialState, modeLabels, modeSchema, readingFontSchema, splitContentCache, type Bundle, type Entry, type Mode, type State } from './model';
 import { cleanCaptureMarkers, repairArticleLinks, appendDailyNoteLink, dailyNotePath, readDailyNoteSettings, renderDailyNoteTemplate } from './daily-note';
 import { ReaderView, VIEW_TYPE } from './view';
 import { vaultSourceId, VaultFolderPicker, VaultSources } from './vault-source';
@@ -33,8 +33,7 @@ export default class QiaomuRssPlugin extends Plugin {
     const data: unknown = await this.loadData();
     try { this.state = initialState(data); }
     catch { new Notice('RSS 配置不兼容，已使用默认设置。'); }
-    // One-time migration: strip duplicated `content` from channelStates["@local"] to halve data.json
-    { let migrated = 0; for (const [key, cs] of Object.entries(this.state.channelStates)) if (key.includes('@local') || key.includes('@group:')) for (const e of cs.entries as { content?: string }[]) if (e.content) { delete (e as { content?: unknown }).content; migrated++; } if (migrated) { void this.persist(); console.debug(`[qiaomu-ai-rss] migrated: stripped content from ${migrated} channelStates entries`); } }
+    await this.loadContentCache();
     this.images = new LocalImages(this.app.vault, `${this.app.vault.configDir}/plugins/${this.manifest.id}/image-cache`);
     registerImageDrops(this);
     this.subscriptions = new Subscriptions(() => this.state, () => this.persist());
@@ -101,8 +100,31 @@ export default class QiaomuRssPlugin extends Plugin {
     } catch { new Notice('无法打开 RSS 阅读器。'); }
   }
   persist(): Promise<void> {
-    this.saving = this.saving.catch(() => undefined).then(() => this.saveData(this.state));
+    this.saving = this.saving.catch(() => undefined).then(() => this.saveSplit());
     return this.saving;
+  }
+  private cachePath() { return `${this.app.vault.configDir}/plugins/${this.manifest.id}/content-cache.json`; }
+  private async saveSplit(): Promise<void> {
+    // data.json keeps config + metadata only; entry bodies go to a rebuildable cache file.
+    const { slim, cache } = splitContentCache(this.state);
+    await this.saveData(slim);
+    try { await this.app.vault.adapter.write(this.cachePath(), JSON.stringify(cache)); }
+    catch { /* body cache is rebuildable from feeds; a write failure must not break state save */ }
+  }
+  private async loadContentCache(): Promise<void> {
+    try {
+      const parsed: unknown = JSON.parse(await this.app.vault.adapter.read(this.cachePath()));
+      if (parsed && typeof parsed === 'object') attachContentCache(this.state, parsed as Record<string, string>);
+    } catch { /* no cache yet; bodies rehydrate on next refresh */ }
+  }
+  isLater(id: string): boolean { return this.state.readLater.includes(id); }
+  async toggleLater(entry: Entry): Promise<boolean> {
+    const queued = this.state.readLater.includes(entry.id);
+    this.state.readLater = queued
+      ? this.state.readLater.filter(id => id !== entry.id)
+      : [...this.state.readLater, entry.id].slice(-200);
+    await this.persist();
+    return !queued;
   }
   remember(bundle: Bundle) {
     this.state.cache[bundle.entry.id] = bundle;

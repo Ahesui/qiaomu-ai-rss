@@ -48,6 +48,7 @@ export const stateSchema = z.object({
     fontSize: 19, fontFamily: 'fangsong', customFont: '', lineHeight: 1.9, lineWidth: 36, lastSource: '', selectionPopup: true, markdownFolders: [] }),
   readIds: z.array(z.string()).default([]), favorites: z.record(z.string(), bundleSchema).default({}),
   readLater: z.array(z.string()).default([]),
+  readAt: z.record(z.string(), z.number()).default({}),
   entries: z.array(entrySchema).default([]), sources: z.array(sourceSchema).default([]),
   subscriptions: z.array(subscriptionSchema).default([]),
   channelStates: z.record(z.string(), channelStateSchema).catch({}).default({}),
@@ -81,6 +82,17 @@ export function splitContentCache(state: State): { slim: State; cache: Record<st
     },
     cache,
   };
+}
+// Strip bodies from a feed's entries without mutating shared row objects:
+// returns fresh entry objects so an open article (holding the old ref) keeps rendering.
+export function stripFeedBodies(entries: Entry[]): { entries: Entry[]; freedBytes: number; freedCount: number } {
+  let freedBytes = 0, freedCount = 0;
+  const next = entries.map(entry => {
+    if (!entry.content) return entry;
+    freedBytes += entry.content.length; freedCount++;
+    return { ...entry, content: undefined };
+  });
+  return { entries: next, freedBytes, freedCount };
 }
 export function attachContentCache(state: State, cache: Record<string, string>): void {
   const attach = (entry: Entry): void => { if (!entry.content && typeof cache[entry.id] === 'string') entry.content = cache[entry.id]; };

@@ -367,8 +367,11 @@ export class ReaderView extends ItemView {
       (target?.closest?.('input,textarea,select,[contenteditable=true]'))) return;
     const key = event.key.toLowerCase();
     if (key === 'j' || key === 'k') { event.preventDefault(); event.stopPropagation(); this.navigate(key === 'j' ? 1 : -1); }
-    if (key === 'm' && this.bundle) { event.preventDefault(); event.stopPropagation(); void this.plugin.toggleLater(this.bundle.entry).then(() => { this.renderFilters(); this.renderReader(true); this.renderList(); }); }
-    if (event.key === '[' || event.key === 'f') { event.preventDefault(); this.toggleFocus(); }
+    if (event.key === '[') { event.preventDefault(); this.toggleFocus(); }
+    if (key === 'f' && this.bundle) { event.preventDefault(); event.stopPropagation(); this.toggleFavorite(); }
+    if (key === 'u' && this.bundle) { event.preventDefault(); event.stopPropagation(); this.toggleUnread(); }
+    if (key === 'o' && this.bundle) { event.preventDefault(); event.stopPropagation(); this.openOriginal(); }
+    if (key === 'e' && this.bundle) { event.preventDefault(); event.stopPropagation(); this.noteCurrent(); }
     if (event.key === '/') { event.preventDefault(); this.toggleSearch(true); }
     if (event.key === 'Escape') { this.focused = false; this.contentEl.removeClass('qrs-focus'); this.contentEl.removeClass('qrs-has-article'); }
   }
@@ -531,7 +534,10 @@ export class ReaderView extends ItemView {
     if (this.filter === 'unread') this.unreadSession.add(entry.id);
     const version = ++this.articleVersion; const state = this.plugin.state;
     this.bundle = state.cache[entry.id] || state.favorites[entry.id] || { entry, rewrite: entry.rewrite ?? null, translation: null, fetchedAt: 0 };
-    state.readIds = [...new Set([...state.readIds, entry.id])].slice(-5000); this.run(() => this.plugin.persist());
+    state.readIds = [...new Set([...state.readIds, entry.id])].slice(-5000);
+    state.readAt[entry.id] = Date.now();
+    if (Object.keys(state.readAt).length > 6000) { const keep = new Set(state.readIds); for (const k of Object.keys(state.readAt)) if (!keep.has(k)) delete state.readAt[k]; }
+    this.run(() => this.plugin.persist());
     this.mode = entry.origin === 'local' || entry.origin === 'vault' ? 'original' : state.settings.defaultMode; this.message = ''; this.articleLoading = true; this.reader.setAttribute('aria-busy', 'true');
     this.contentEl.addClass('qrs-has-article'); this.renderReader(); this.reader.scrollTop = 0; this.lastReaderTop = 0; this.reader.focus({ preventScroll: true }); this.renderList();
     if (resume) { this.mode = resume.mode; this.pendingScroll = { listTop: resume.listTop, readerTop: resume.readerTop }; this.renderReader(); this.restoreOffsets(); }
@@ -557,6 +563,29 @@ export class ReaderView extends ItemView {
     this.bundle = bundle; this.mode = mode; this.message = '';
     this.reader.setAttribute('aria-busy', 'false'); this.contentEl.addClass('qrs-has-article');
     this.renderReader(); this.reader.scrollTop = 0; this.lastReaderTop = 0; this.reader.focus({ preventScroll: true }); this.renderList();
+  }
+  private toggleFavorite() {
+    const bundle = this.bundle; if (!bundle) return;
+    this.run(async () => {
+      if (this.plugin.state.favorites[bundle.entry.id]) delete this.plugin.state.favorites[bundle.entry.id];
+      else this.plugin.state.favorites[bundle.entry.id] = bundle;
+      await this.plugin.persist(); this.renderReader(true); this.renderList();
+    });
+  }
+  private toggleUnread() {
+    const bundle = this.bundle; if (!bundle) return;
+    this.run(async () => {
+      const read = this.plugin.state.readIds.includes(bundle.entry.id);
+      const ids = this.plugin.state.readIds.filter(id => id !== bundle.entry.id);
+      this.plugin.state.readIds = read ? ids : [...ids, bundle.entry.id].slice(-5000);
+      await this.plugin.persist(); this.renderReader(true); this.renderList();
+    });
+  }
+  private openOriginal() {
+    const bundle = this.bundle; if (!bundle) return;
+    const link = safeUrl(bundle.entry.link || '');
+    if (link) this.contentEl.win.open(link, '_blank', 'noopener,noreferrer');
+    else new Notice('这篇文章没有原文链接。');
   }
   private noteCurrent() {
     const bundle = this.bundle; if (!bundle) return;
@@ -634,7 +663,7 @@ export class ReaderView extends ItemView {
       empty.createEl('button', { cls: 'qrs-welcome-next', text: '下一则 →' }).onclick = () => { this.welcomeTip = (this.welcomeTip + 1) % tips.length; showTip(); };
       if (!Platform.isMobileApp) {
         const keys = empty.createDiv('qrs-welcome-keys');
-        for (const [key, label] of [['J / K', '下篇 / 上篇'], ['[', '收起列表'], ['/', '搜索文章'], ['M', '稍后读']]) { const item = keys.createSpan(); item.createEl('kbd', { text: key }); item.createSpan({ text: label }); }
+        for (const [key, label] of [['J / K', '下篇 / 上篇'], ['[', '收起列表'], ['/', '搜索文章'], ['M', '稍后读'], ['F', '收藏'], ['E', '记日记'], ['O', '原文'], ['U', '已读']]) { const item = keys.createSpan(); item.createEl('kbd', { text: key }); item.createSpan({ text: label }); }
       }
       return;
     }
@@ -652,10 +681,7 @@ export class ReaderView extends ItemView {
     const appearance = this.addIconButton(actions, 'type', '阅读设置', () => { this.appearanceOpen = !this.appearanceOpen; this.renderReader(true); });
     appearance.setAttribute('aria-expanded', String(this.appearanceOpen)); appearance.setAttribute('aria-controls', this.appearanceId);
     const favorite = !!this.plugin.state.favorites[bundle.entry.id];
-    const bookmark = this.addIconButton(actions, 'bookmark', favorite ? '取消收藏' : '收藏文章', () => this.run(async () => {
-      if (favorite) delete this.plugin.state.favorites[bundle.entry.id]; else this.plugin.state.favorites[bundle.entry.id] = bundle;
-      await this.plugin.persist(); this.renderReader(true); this.renderList();
-    }));
+    const bookmark = this.addIconButton(actions, 'bookmark', favorite ? '取消收藏' : '收藏文章 F', () => this.toggleFavorite());
     bookmark.setAttribute('aria-pressed', String(favorite)); bookmark.toggleClass('is-bookmarked', favorite);
     const later = this.plugin.isLater(bundle.entry.id);
     const laterButton = this.addIconButton(actions, 'clock', later ? '移出稍后读' : '稍后读 M', () => this.run(async () => {
@@ -663,11 +689,7 @@ export class ReaderView extends ItemView {
     }));
     laterButton.setAttribute('aria-pressed', String(later)); laterButton.toggleClass('is-bookmarked', later);
     const read = this.plugin.state.readIds.includes(bundle.entry.id);
-    const readButton = this.addIconButton(actions, read ? 'circle-check' : 'circle', read ? '标为未读' : '标为已读', () => this.run(async () => {
-      const ids = this.plugin.state.readIds.filter(id => id !== bundle.entry.id);
-      this.plugin.state.readIds = read ? ids : [...ids, bundle.entry.id].slice(-5000);
-      await this.plugin.persist(); this.renderReader(true); this.renderList();
-    }));
+    const readButton = this.addIconButton(actions, read ? 'circle-check' : 'circle', read ? '标为未读 U' : '标为已读 U', () => this.toggleUnread());
     readButton.setAttribute('aria-pressed', String(read));
     this.addIconButton(actions, 'notebook-pen', '记到今日日记', () => this.noteCurrent());
     const more = this.addIconButton(actions, 'ellipsis', '更多文章操作', () => {

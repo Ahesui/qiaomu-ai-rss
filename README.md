@@ -1,14 +1,41 @@
 <img src="docs/images/qiaomu-rss-icon.png" alt="Qiaomu AI RSS" width="80" />
 
-# Qiaomu AI RSS · 乔木 RSS
+# Qiaomu AI RSS · 乔木 RSS（高性能 Fork）
 
-**[在 Obsidian 官方插件库安装 · Install](https://community.obsidian.md/plugins/qiaomu-ai-rss)**
+> **Fork 自 [joeseesun/qiaomu-ai-rss](https://github.com/joeseesun/qiaomu-ai-rss)，向上游保持兼容。**
+> 当你的订阅数冲到几十上百、文章缓存上千篇，原版会开始转圈、发热、越用越慢——这个 Fork 就是为解决这件事而生的：**90 个订阅照样丝滑，同步一次几秒钟，配置文件从 49MB 瘦到 4MB。**
+
+**[在 Obsidian 官方插件库安装原版 · Install](https://community.obsidian.md/plugins/qiaomu-ai-rss)** · **[安装本 Fork（更快）↓](#安装本-fork)**
 
 在 Obsidian 中阅读 [乔木 RSS](https://rss.qiaomu.ai/) 精选文章，也可以添加自己的 RSS / Atom 订阅，把值得记住的文章链接加入今日日记。
 
 Read Qiaomu feeds and your own RSS / Atom subscriptions in a native Obsidian view, switch between original articles and available Chinese AI rewrites or translations, and add article links to your Daily Note.
 
 ![Qiaomu AI RSS 缩略图列表与今日日记分屏](docs/images/listing-2026-09/reading-notes.png)
+
+## 为什么用这个 Fork？
+
+| 场景（90 订阅 / 2000+ 篇缓存实测） | 原版 | 本 Fork |
+| --- | --- | --- |
+| 打开阅读器 | 一次创建 2000+ 个 DOM 行，内存直接起飞 | 只渲染首屏 60 行，滚动自动加载，缩略图 LRU 只留 60 张 |
+| 点一次"刷新" | 90 个源全量下载 + 逐篇清洗，90 次 49MB 文件写入 | 条件 GET（304 直接跳过）+ 失败退避 + 无变化零写入，稳态同步几秒钟 |
+| 配置文件体积 | `data.json` 49MB，Sync 全量同步 | 配置 ~4MB + 可重建的正文缓存分离，滚动不再重写大文件 |
+| 2000 篇看不完 | 只有收藏夹，越堆越烂 | **稍后读队列**（`M` 键入队，读完自动出队）+ **来源健康度**（谁在沉睡，一键退订） |
+| 键盘党 | `j/k` 导航 | `F` 收藏 · `U` 已读 · `O` 原文 · `E` 摘录 · `M` 稍后读，全程不用鼠标 |
+| 磁盘黑盒 | 不知道谁占空间 | 设置 → 存储：各文件体积、各源正文占用，一键清理 |
+
+**实测数字（90 源 / 2081 篇缓存）：** 常规写入 25.8MB → 4.3MB（-83%）；同步写入 90 次 → 脏写门控后按需 1 次；列表 DOM 2081 → 60 行窗口；所有改动 `tsc` + `eslint` + 58 个测试全绿，`main.js` 体积不变（4.7MB）。
+
+## Fork 新增功能
+
+- **智能同步 v2**：ETag / Last-Modified 条件请求，304 零解析；失败指数退避（5 分钟 → 1 小时）；单源暂停开关（归档源可彻底跳过）；最久未更新优先；状态栏 `正在同步 x/y` + 结果 breakdown。
+- **稍后读队列**：筛选栏「稍后读（N）」、工具栏时钟按钮、`M` 快捷键；从队列打开即读完出队，上限 200 条。
+- **来源阅读统计**：命令面板「来源阅读统计」，90 源按近 30 天打开数排序，沉睡源两段确认退订。
+- **完整键盘流**：`F` 收藏、`U` 已读、`O` 原文、`E` 记日记、`M` 稍后读（`[` 保留收起列表）。
+- **存储面板**：设置 → 存储，data.json / 正文缓存 / 图片缓存体积一目了然，支持清理图片、清理全部正文、按源清理 Top 8。
+- **存储拆分**：正文进可重建的 `content-cache.json`，`data.json` 只留配置（Sync 友好）；阅读时间戳 `readAt` 支撑统计且自动裁剪。
+
+> 上游原版的所有功能（乔木精选、探索订阅、库内 Markdown、OPML、日记摘录、隐私承诺）原样保留，阅读体验零差异。
 
 ## 功能
 
@@ -33,28 +60,25 @@ Read Qiaomu feeds and your own RSS / Atom subscriptions in a native Obsidian vie
 
 本插件参考自有 [QMReader iOS](https://github.com/joeseesun/qmreader-ios) 的产品交互，根据 [QMReader 服务](https://github.com/joeseesun/qmreader) 的公共 API 独立开发。它不是其他 Obsidian RSS 插件的 fork。
 
-## 安装
+## 安装本 Fork
 
-需要 Obsidian **1.13.0 或更新版本**。
+需要 Obsidian **1.13.0 或更新版本**。本 Fork 版本号 `0.21.0`，与上游官方版本完全兼容（配置、收藏、日记链接通用，可随时切回）。
 
-### 官方插件库
+### BRAT（一键安装，推荐）
 
-打开 [官方插件页面](https://community.obsidian.md/plugins/qiaomu-ai-rss)，查看审核状态并点击 **Add to Obsidian** 安装。也可以在 Obsidian 第三方插件的浏览页面搜索 **Qiaomu AI RSS**。若客户端暂未列出，可使用下方 BRAT 或手动安装。
-
-以下 BRAT 与手动安装方式仍然可用。
-
-### BRAT
-
-安装 BRAT 后，添加仓库 `joeseesun/qiaomu-ai-rss`，启用 **Qiaomu AI RSS**。
+安装 BRAT 后，添加仓库 **`Ahesui/qiaomu-ai-rss`**，启用 **Qiaomu AI RSS** 即可。更新也在 BRAT 里一键完成。
 
 ### 手动安装
 
-1. 从 [Releases](https://github.com/joeseesun/qiaomu-ai-rss/releases) 下载 `main.js`、`manifest.json`、`styles.css`。
-2. 在当前库的配置目录（默认 `.obsidian`）下创建 `plugins/qiaomu-ai-rss/`，将三个文件放入该文件夹。
+1. 从 [本仓库 Releases](https://github.com/Ahesui/qiaomu-ai-rss/releases) 下载 `main.js`、`manifest.json`、`styles.css`。
+2. 在当前库的配置目录（默认 `.obsidian`）下创建 `plugins/qiaomu-ai-rss/`，将三个文件放入该文件夹（覆盖原版文件前建议备份 `data.json`）。
 3. 在 Obsidian 的第三方插件设置中启用 **Qiaomu AI RSS**。
 4. 点击侧边栏 RSS 图标，或运行命令 **Qiaomu AI RSS: 打开乔木 RSS 阅读器**。
+5. 首次启动会自动迁移旧数据（正文进独立缓存文件），`data.json` 瘦身即刻生效。
 
-GitHub 发布和官方目录审核是独立流程；每个版本的审核结果以官方页面为准。
+### 也想用官方原版？
+
+打开 [官方插件页面](https://community.obsidian.md/plugins/qiaomu-ai-rss)，点击 **Add to Obsidian** 安装。官方库版本与本 Fork 配置互通，来回切换不丢数据。
 
 ## 使用
 

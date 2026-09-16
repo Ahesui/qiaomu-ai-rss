@@ -387,13 +387,20 @@ export class ReaderView extends ItemView {
       if (this.vaultScope()) { this.entries = this.plugin.vaultSources.entries(this.source.slice(7)); this.hasMore = false; return; }
       if (this.personalScope()) {
         const feeds = this.selectedFeeds();
-        await this.plugin.subscriptions.refresh(feeds.map(feed => feed.id), this.reader.ownerDocument, force, () => {
-          if (!this.closed && version === this.listVersion) { this.entries = this.localEntries(); this.scheduleRenderList(); }
+        if (feeds.length) this.status.setText(`正在同步 0/${feeds.length}…`);
+        const summary = await this.plugin.subscriptions.refresh(feeds.map(feed => feed.id), this.reader.ownerDocument, force, (done, total) => {
+          if (!this.closed && version === this.listVersion) {
+            this.status.setText(`正在同步 ${done}/${total}…`);
+            this.entries = this.localEntries(); this.scheduleRenderList();
+          }
         });
         if (this.closed || version !== this.listVersion) return;
         this.entries = this.localEntries(); this.hasMore = false;
-        const failed = feeds.filter(feed => feed.error).length;
-        this.status.setText(failed ? `${failed} 个订阅刷新失败，保留已有文章。可在订阅管理中查看详情。` : '');
+        const parts: string[] = [];
+        if (summary.changed) parts.push(`${summary.changed} 个源有更新`);
+        if (summary.failed) parts.push(`${summary.failed} 个订阅刷新失败，保留已有文章`);
+        if (summary.skipped) parts.push(`${summary.skipped} 个跳过（未到期/已暂停/退避中）`);
+        this.status.setText(parts.length ? `${parts.join('，')}。${summary.failed ? '可在订阅管理中查看详情。' : ''}` : '');
         return;
       }
       const api = this.plugin.api();

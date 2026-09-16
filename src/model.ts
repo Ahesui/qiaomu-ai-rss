@@ -27,6 +27,8 @@ export const pageSchema = z.object({ entries: z.array(entrySchema), hasMore: z.b
 export const subscriptionSchema = z.object({
   id: z.string(), url: z.string(), name: z.string(), group: z.string().default(''),
   entries: z.array(entrySchema).default([]), updatedAt: z.number().default(0), error: z.string().default(''),
+  etag: optionalText, lastModified: optionalText, paused: z.boolean().default(false),
+  errorCount: z.number().int().default(0), lastErrorAt: z.number().default(0),
 });
 export type Subscription = z.infer<typeof subscriptionSchema>;
 export const channelStateSchema = z.object({
